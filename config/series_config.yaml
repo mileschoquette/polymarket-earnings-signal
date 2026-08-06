@@ -1,0 +1,25 @@
+# Kalshi series tickers and date ranges per category.
+# Fill in exact series_ticker values once confirmed against the live API (Phase 2).
+fomc:
+  series_ticker: null # e.g. "FED"
+  start_date: "2021-01-01"
+  release_time_et: "14:00"
+
+cpi:
+  series_ticker: null # e.g. "CPI"
+  start_date: "2021-01-01"
+  release_time_et: "08:30"
+
+jobs:
+  series_ticker: null # e.g. "NFP" / "PAYROLLS"
+  start_date: "2021-01-01"
+  release_time_et: "08:30"
+
+earnings_case_study:
+  tickers: ["PLTR"]
+  start_date: "2026-08-01"
+
+comparison_instruments:
+  fomc: ["TLT", "IEF", "SPY"]
+  jobs: ["SPY", "TLT"]
+  cpi: ["TLT", "SHY"]
