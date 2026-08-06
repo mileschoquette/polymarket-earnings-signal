@@ -8,6 +8,11 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 from src.strategy.backtest import run_backtest
+from src.strategy.benchmarks import (
+    buy_and_hold_direction,
+    historical_only_direction,
+    perfect_foresight_direction,
+)
 from src.strategy.performance import (
     aggregate_by_date,
     annualized_sharpe,
@@ -18,6 +23,7 @@ from src.strategy.performance import (
     sortino_ratio,
 )
 from src.strategy.signal import compute_signal
+from src.strategy.significance import block_bootstrap_sharpe_ci, permutation_test
 
 DATA_PATH = Path(__file__).resolve().parents[1] / "data" / "processed" / "earnings_panel.parquet"
 FIGURES_DIR = Path(__file__).resolve().parents[1] / "paper" / "figures"
@@ -51,6 +57,63 @@ def plot_equity_curves(results_by_horizon, out_dir):
     fig.tight_layout()
     fig.savefig(out_dir / "backtest_equity_curve.png", dpi=150)
     plt.close(fig)
+
+
+def _summarize_strategy(name, result, events_per_year):
+    """One row of the benchmark comparison table: Sharpe (event-level, date-aggregated),
+    executed trades, and hit rate.
+    """
+    pnl, executed = result["net_pnl"], result["position_size"] > 0
+    daily_pnl = aggregate_by_date(pnl, result["scheduled_date"])
+    daily_events_per_year = dates_per_year(result["scheduled_date"])
+    return {
+        "strategy": name,
+        "sharpe_event": annualized_sharpe(pnl, events_per_year),
+        "sharpe_date": annualized_sharpe(daily_pnl, daily_events_per_year),
+        "executed_trades": int(executed.sum()),
+        "hit_rate": hit_rate(pnl, executed) if executed.any() else float("nan"),
+    }
+
+
+def run_benchmarks_and_significance(df, horizon="t_plus_1"):
+    """Benchmarks the main divergence signal against buy-and-hold (isolates whether long/short/
+    flat selection beats always-long), historical-only (isolates whether firm history alone,
+    without the market's price, would already look profitable), and a perfect-foresight ceiling
+    (not a real competitor -- uses the realized outcome), all run through the identical
+    run_backtest machinery as the main strategy. Then reports a permutation test (does the
+    observed Sharpe beat random direction assignment over the same trades?) and a block-bootstrap
+    Sharpe CI clustered by scheduled_date (respecting same-day event clustering).
+    """
+    signal_df = compute_signal(df)
+    events_per_year = _events_per_year(signal_df)
+
+    rows = [
+        _summarize_strategy("main (divergence signal)", run_backtest(signal_df, exit_horizon=horizon), events_per_year),
+        _summarize_strategy("buy-and-hold", run_backtest(buy_and_hold_direction(df), exit_horizon=horizon), events_per_year),
+        _summarize_strategy("historical-only", run_backtest(historical_only_direction(df), exit_horizon=horizon), events_per_year),
+        _summarize_strategy(
+            "perfect foresight (CEILING, not a competitor)",
+            run_backtest(perfect_foresight_direction(df), exit_horizon=horizon),
+            events_per_year,
+        ),
+    ]
+    table = pd.DataFrame(rows).set_index("strategy")
+
+    print(f"\n=== Benchmarks and significance ({horizon}) ===")
+    print(table.to_string(float_format=lambda x: f"{x:.3f}"))
+
+    print("\n--- Permutation test: main signal vs. random direction assignment over the same trades ---")
+    perm = permutation_test(signal_df, "direction", horizon, n_permutations=1000, seed=0)
+    print(f"observed Sharpe (date-aggregated): {perm['observed_sharpe']:.3f}")
+    print(f"null Sharpe mean / std:            {perm['null_sharpes'].mean():.3f} / {perm['null_sharpes'].std(ddof=1):.3f}")
+    print(f"p-value (one-sided, P(null >= observed)): {perm['p_value']:.4f}")
+
+    print("\n--- Block bootstrap 90% CI for main signal's Sharpe (clustered by scheduled_date) ---")
+    boot = block_bootstrap_sharpe_ci(signal_df, "direction", horizon, n_boot=1000, seed=0, ci=0.90)
+    print(f"observed Sharpe (date-aggregated): {boot['observed_sharpe']:.3f}")
+    print(f"90% CI: [{boot['lo']:.3f}, {boot['hi']:.3f}]")
+
+    return table, perm, boot
 
 
 def main():
@@ -88,6 +151,8 @@ def main():
 
     plot_equity_curves(results_by_horizon, FIGURES_DIR)
     print(f"\nSaved figure to {FIGURES_DIR / 'backtest_equity_curve.png'}")
+
+    run_benchmarks_and_significance(df, horizon="t_plus_1")
 
 
 if __name__ == "__main__":
