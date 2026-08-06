@@ -1,0 +1,94 @@
+"""Driver for the backtest stage: builds the divergence signal (no look-ahead expanding-std
+threshold), runs the volatility-targeted backtest at both exit horizons, reports performance
+metrics, and saves an equity-curve comparison.
+"""
+from pathlib import Path
+
+import matplotlib.pyplot as plt
+import pandas as pd
+
+from src.strategy.backtest import run_backtest
+from src.strategy.performance import (
+    aggregate_by_date,
+    annualized_sharpe,
+    calmar_ratio,
+    dates_per_year,
+    hit_rate,
+    max_drawdown,
+    sortino_ratio,
+)
+from src.strategy.signal import compute_signal
+
+DATA_PATH = Path(__file__).resolve().parents[1] / "data" / "processed" / "earnings_panel.parquet"
+FIGURES_DIR = Path(__file__).resolve().parents[1] / "paper" / "figures"
+BLUE = "#2a78d6"  # categorical slot 1, validated in dataviz palette (t+1)
+ORANGE = "#eb6834"  # categorical slot 2, validated in dataviz palette (t+5)
+GRAY = "#52514e"  # muted reference-line ink, validated in dataviz palette
+
+HORIZONS = {"t_plus_1": BLUE, "t_plus_5": ORANGE}
+
+
+def _events_per_year(df):
+    dates = pd.to_datetime(df["scheduled_date"])
+    span_years = (dates.max() - dates.min()).days / 365.25
+    return len(df) / span_years
+
+
+def plot_equity_curves(results_by_horizon, out_dir):
+    """Cumulative sum of net_pnl over time, one line per exit horizon."""
+    fig, ax = plt.subplots(figsize=(9, 6))
+    for horizon, color in HORIZONS.items():
+        result = results_by_horizon[horizon].sort_values("scheduled_date")
+        dates = pd.to_datetime(result["scheduled_date"])
+        equity = result["net_pnl"].cumsum()
+        ax.plot(dates, equity, color=color, linewidth=2, label=horizon.replace("_", " "))
+    ax.axhline(0, color=GRAY, linewidth=0.75, alpha=0.5)
+    ax.set_xlabel("Scheduled date")
+    ax.set_ylabel("Cumulative net P&L (sum of risk-scaled per-event returns)")
+    ax.set_title("Divergence signal backtest: equity curve by exit horizon")
+    ax.legend(frameon=False, loc="best")
+    ax.spines[["top", "right"]].set_visible(False)
+    fig.tight_layout()
+    fig.savefig(out_dir / "backtest_equity_curve.png", dpi=150)
+    plt.close(fig)
+
+
+def main():
+    df = pd.read_parquet(DATA_PATH)
+    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+
+    signal_df = compute_signal(df)
+    events_per_year = _events_per_year(signal_df)
+    n_non_flat = int((signal_df["direction"] != 0).sum())
+    print(f"events_per_year: {events_per_year:.2f}")
+    print(f"non-flat (direction != 0) events: {n_non_flat}/{len(signal_df)}")
+
+    results_by_horizon = {}
+    for horizon in HORIZONS:
+        result = run_backtest(signal_df, exit_horizon=horizon)
+        results_by_horizon[horizon] = result
+
+        pnl, executed = result["net_pnl"], result["position_size"] > 0
+        print(f"\n--- {horizon} (event-level, upper bound -- see date-aggregated below) ---")
+        print(f"executed trades: {int(executed.sum())} (non-flat signal: {int((result['direction'] != 0).sum())})")
+        print(f"annualized Sharpe: {annualized_sharpe(pnl, events_per_year):.3f}")
+        print(f"Sortino ratio:     {sortino_ratio(pnl, events_per_year):.3f}")
+        print(f"max drawdown:      {max_drawdown(pnl):.4f}")
+        print(f"hit rate:          {hit_rate(pnl, executed):.3f}")
+        print(f"Calmar ratio:      {calmar_ratio(pnl, events_per_year):.3f}")
+
+        daily_pnl = aggregate_by_date(pnl, result["scheduled_date"])
+        daily_events_per_year = dates_per_year(result["scheduled_date"])
+        print(f"\n--- {horizon} (date-aggregated, same-day events summed into one period) ---")
+        print(f"distinct trading dates: {len(daily_pnl)} (dates_per_year: {daily_events_per_year:.2f})")
+        print(f"annualized Sharpe: {annualized_sharpe(daily_pnl, daily_events_per_year):.3f}")
+        print(f"Sortino ratio:     {sortino_ratio(daily_pnl, daily_events_per_year):.3f}")
+        print(f"max drawdown:      {max_drawdown(daily_pnl):.4f}")
+        print(f"Calmar ratio:      {calmar_ratio(daily_pnl, daily_events_per_year):.3f}")
+
+    plot_equity_curves(results_by_horizon, FIGURES_DIR)
+    print(f"\nSaved figure to {FIGURES_DIR / 'backtest_equity_curve.png'}")
+
+
+if __name__ == "__main__":
+    main()
