@@ -1,18 +1,25 @@
 # Kalshi series tickers and date ranges per category.
-# Fill in exact series_ticker values once confirmed against the live API (Phase 2).
+# Confirmed live against the API in data/external/kalshi_api_notes.md.
+# All three are threshold-ladder markets (independent binary "above X" contracts per event),
+# not single binaries and not explicit range buckets. legacy_tickers are pre-rename event-ticker
+# prefixes needed to enumerate full history via GET /events (the series_ticker filter alone
+# misses renamed history on /historical/markets).
 fomc:
-  series_ticker: null # e.g. "FED"
-  start_date: "2021-01-01"
+  series_ticker: "KXFED"
+  legacy_tickers: ["FED"]
+  start_date: "2021-07-01" # earliest event FED-21JUL
   release_time_et: "14:00"
 
 cpi:
-  series_ticker: null # e.g. "CPI"
-  start_date: "2021-01-01"
+  series_ticker: "KXCPI"
+  legacy_tickers: ["CPI"]
+  start_date: "2021-06-01" # earliest event CPI-21JUN
   release_time_et: "08:30"
 
 jobs:
-  series_ticker: null # e.g. "NFP" / "PAYROLLS"
-  start_date: "2021-01-01"
+  series_ticker: "KXPAYROLLS"
+  legacy_tickers: ["PAYROLLS", "PROLLS"]
+  start_date: "2023-03-01" # earliest event PROLLS-23MAR, no earlier jobs-ladder markets exist
   release_time_et: "08:30"
 
 earnings_case_study:
@@ -23,3 +30,7 @@ comparison_instruments:
   fomc: ["TLT", "IEF", "SPY"]
   jobs: ["SPY", "TLT"]
   cpi: ["TLT", "SHY"]
+
+kalshi_api:
+  base_url: "https://external-api.kalshi.com/trade-api/v2"
+  fallback_base_url: "https://api.elections.kalshi.com/trade-api/v2"
