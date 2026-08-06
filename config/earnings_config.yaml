@@ -1,0 +1,17 @@
+polymarket_api:
+  gamma_base_url: "https://gamma-api.polymarket.com"
+  clob_base_url: "https://clob.polymarket.com"
+  earnings_tag_id: 1013 # confirmed live: "Earnings" tag, 1228 closed events since Jan 2024
+
+ingestion:
+  events_page_size: 100 # Gamma /events appears capped at 100 per page regardless of requested limit
+  price_history_fidelity_minutes: 60
+
+features:
+  historical_beat_rate_window: 8 # trailing quarters, per ticker, strictly prior to the event being scored
+  momentum_window_days: [5, 1] # implied-prob snapshot at T-5d and T-1d before scheduled earnings date
+
+backtest:
+  entry_horizon: "T-1_close"
+  exit_horizons_days: [1, 5]
+  cost_bps: 5
