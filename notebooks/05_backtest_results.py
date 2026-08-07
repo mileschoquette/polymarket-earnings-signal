@@ -26,6 +26,7 @@ from src.strategy.signal import compute_signal
 from src.strategy.significance import block_bootstrap_sharpe_ci, permutation_test
 
 DATA_PATH = Path(__file__).resolve().parents[1] / "data" / "processed" / "earnings_panel.parquet"
+SPY_PATH = Path(__file__).resolve().parents[1] / "data" / "raw" / "yfinance" / "SPY.parquet"
 FIGURES_DIR = Path(__file__).resolve().parents[1] / "paper" / "figures"
 BLUE = "#2a78d6"  # categorical slot 1, validated in dataviz palette (t+1)
 ORANGE = "#eb6834"  # categorical slot 2, validated in dataviz palette (t+5)
@@ -56,6 +57,39 @@ def plot_equity_curves(results_by_horizon, out_dir):
     ax.spines[["top", "right"]].set_visible(False)
     fig.tight_layout()
     fig.savefig(out_dir / "backtest_equity_curve.png", dpi=150)
+    plt.close(fig)
+
+
+def plot_strategy_vs_market(daily_pnl, out_dir, horizon_label):
+    """Strategy cumulative net P&L (date-aggregated, risk-scaled units) against SPY's passive
+    cumulative return over the identical calendar window, so the reader can see the strategy's
+    path next to simply holding the market over the same period. The two lines aren't in
+    dimensionally identical units (the strategy's is a sum of vol-targeted per-event risk
+    contributions, not a % return on fully-deployed capital), so this is a shape/timing
+    comparison, not a literal dollar-for-dollar return comparison -- noted here rather than
+    implied by the chart alone.
+    """
+    spy_close = pd.read_parquet(SPY_PATH)["Close"]
+    spy_close.index = spy_close.index.tz_localize(None)
+
+    start, end = daily_pnl.index.min(), daily_pnl.index.max()
+    spy_window = spy_close[(spy_close.index >= start) & (spy_close.index <= end)]
+    spy_cum_return = spy_window / spy_window.iloc[0] - 1
+    strategy_cum_pnl = daily_pnl.cumsum()
+
+    fig, ax = plt.subplots(figsize=(9, 6))
+    ax.plot(strategy_cum_pnl.index, strategy_cum_pnl.values, color=BLUE, linewidth=2,
+            label=f"Divergence strategy ({horizon_label}, cumulative net P&L)")
+    ax.plot(spy_cum_return.index, spy_cum_return.values, color=GRAY, linewidth=2, linestyle="--",
+            label="SPY (buy-and-hold, cumulative return)")
+    ax.axhline(0, color=GRAY, linewidth=0.75, alpha=0.5)
+    ax.set_xlabel("Date")
+    ax.set_ylabel("Cumulative return / P&L")
+    ax.set_title("Strategy vs. market: cumulative return over time")
+    ax.legend(frameon=False, loc="best")
+    ax.spines[["top", "right"]].set_visible(False)
+    fig.tight_layout()
+    fig.savefig(out_dir / "strategy_vs_market.png", dpi=150)
     plt.close(fig)
 
 
@@ -149,8 +183,12 @@ def main():
         print(f"max drawdown:      {max_drawdown(daily_pnl):.4f}")
         print(f"Calmar ratio:      {calmar_ratio(daily_pnl, daily_events_per_year):.3f}")
 
+        if horizon == "t_plus_1":
+            plot_strategy_vs_market(daily_pnl, FIGURES_DIR, horizon.replace("_", " "))
+
     plot_equity_curves(results_by_horizon, FIGURES_DIR)
     print(f"\nSaved figure to {FIGURES_DIR / 'backtest_equity_curve.png'}")
+    print(f"Saved figure to {FIGURES_DIR / 'strategy_vs_market.png'}")
 
     run_benchmarks_and_significance(df, horizon="t_plus_1")
 
