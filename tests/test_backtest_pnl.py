@@ -203,3 +203,23 @@ def test_dates_per_year_counts_distinct_dates_not_events():
     dates = ["2024-01-01", "2024-01-01", "2025-01-01"]
     result = dates_per_year(dates)
     assert abs(result - 2.0) < 0.01
+
+
+def test_max_drawdown_hand_computable():
+    from src.strategy.performance import max_drawdown
+
+    # cumsum: 0.5, -0.3, -1.1, -0.6 -> running peak 0.5 throughout -> trough (cum - peak) = -1.6
+    pnl = pd.Series([0.5, -0.8, -0.8, 0.5])
+    assert abs(max_drawdown(pnl) - (-1.6)) < 1e-12
+
+
+def test_max_drawdown_is_not_bounded_at_minus_one():
+    from src.strategy.performance import max_drawdown
+
+    # This project's max_drawdown sums risk-scaled per-event/per-date returns rather than
+    # compounding them into a bounded NAV ratio (see the function's own docstring), so a run of
+    # leveraged losing periods can push cumulative summed P&L below -1. A drawdown below -1 is
+    # therefore not, by itself, evidence of a bug -- this test pins that down so a future reader
+    # doesn't "fix" it into the bounded [-1, 0] convention used by percentage-of-peak drawdown.
+    pnl = pd.Series([0.1, -0.9, -0.9])
+    assert max_drawdown(pnl) < -1.0
