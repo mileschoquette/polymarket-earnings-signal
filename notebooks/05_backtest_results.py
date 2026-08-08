@@ -23,7 +23,7 @@ from src.strategy.performance import (
     sortino_ratio,
 )
 from src.strategy.signal import compute_signal
-from src.strategy.significance import block_bootstrap_sharpe_ci, permutation_test
+from src.strategy.significance import block_bootstrap_sharpe_ci, jobson_korkie_test, permutation_test
 
 DATA_PATH = Path(__file__).resolve().parents[1] / "data" / "processed" / "earnings_panel.parquet"
 SPY_PATH = Path(__file__).resolve().parents[1] / "data" / "raw" / "yfinance" / "SPY.parquet"
@@ -147,7 +147,17 @@ def run_benchmarks_and_significance(df, horizon="t_plus_1"):
     print(f"observed Sharpe (date-aggregated): {boot['observed_sharpe']:.3f}")
     print(f"90% CI: [{boot['lo']:.3f}, {boot['hi']:.3f}]")
 
-    return table, perm, boot
+    print("\n--- Jobson-Korkie test: main signal vs. buy-and-hold (date-aggregated net_pnl) ---")
+    main_daily = aggregate_by_date(
+        run_backtest(signal_df, exit_horizon=horizon)["net_pnl"], signal_df["scheduled_date"],
+    )
+    bh_result = run_backtest(buy_and_hold_direction(df), exit_horizon=horizon)
+    bh_daily = aggregate_by_date(bh_result["net_pnl"], bh_result["scheduled_date"])
+    jk = jobson_korkie_test(main_daily, bh_daily)
+    print(f"sharpe_a (main, per-period): {jk['sharpe_a']:.4f}, sharpe_b (buy-and-hold, per-period): {jk['sharpe_b']:.4f}")
+    print(f"z-statistic: {jk['z_stat']:.3f}, p-value: {jk['p_value']:.4f}, n: {jk['n']}")
+
+    return table, perm, boot, jk
 
 
 def main():
@@ -190,7 +200,15 @@ def main():
     print(f"\nSaved figure to {FIGURES_DIR / 'backtest_equity_curve.png'}")
     print(f"Saved figure to {FIGURES_DIR / 'strategy_vs_market.png'}")
 
-    run_benchmarks_and_significance(df, horizon="t_plus_1")
+    for horizon in HORIZONS:
+        run_benchmarks_and_significance(df, horizon=horizon)
+
+    print("\n=== Transaction-cost sensitivity (main signal, t_plus_1, date-aggregated Sharpe) ===")
+    for cost_bps in (5, 10, 20):
+        cost_result = run_backtest(signal_df, exit_horizon="t_plus_1", cost_bps=cost_bps)
+        cost_daily = aggregate_by_date(cost_result["net_pnl"], cost_result["scheduled_date"])
+        cost_sharpe = annualized_sharpe(cost_daily, dates_per_year(cost_result["scheduled_date"]))
+        print(f"cost_bps={cost_bps:>2}: annualized Sharpe = {cost_sharpe:.3f}")
 
 
 if __name__ == "__main__":

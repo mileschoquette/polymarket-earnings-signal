@@ -9,7 +9,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import pandas as pd
 
-from src.analysis.calibration import brier_decomposition, compare_forecasts
+from src.analysis.calibration import bootstrap_brier_gap_ci, brier_decomposition, compare_forecasts
 from src.analysis.encompassing import (
     build_sample,
     cluster_robustness_checks,
@@ -102,6 +102,14 @@ def main():
 
     comparison = compare_forecasts(df["implied_prob_pre_earnings"], df["historical_beat_rate"], df["actual_beat"])
     _print_section("Paired Brier score: implied probability vs historical baseline", comparison)
+
+    gap_ci = bootstrap_brier_gap_ci(
+        df["implied_prob_pre_earnings"], df["historical_beat_rate"], df["actual_beat"], df["scheduled_date"],
+    )
+    _print_section(
+        "Block-bootstrap 90% CI on the Brier gap (historical - implied), clustered by scheduled_date",
+        {"observed_gap": gap_ci["observed_gap"], "lo": gap_ci["lo"], "hi": gap_ci["hi"]},
+    )
 
     decomp = brier_decomposition(df["implied_prob_pre_earnings"], df["actual_beat"])
     summary = {k: v for k, v in decomp.items() if k != "bin_table"}
