@@ -119,6 +119,28 @@ def main():
     plot_reliability_diagram(decomp["bin_table"], FIGURES_DIR)
     print(f"\nSaved figure to {FIGURES_DIR / 'reliability_diagram.png'}")
 
+    # Same paired non-null subsample compare_forecasts/bootstrap_brier_gap_ci use above (n=1,216),
+    # not the full df, so this decomposition's uncertainty term matches decomp's exactly and the
+    # two are directly comparable for the theory section's corollary.
+    paired = df.dropna(subset=["implied_prob_pre_earnings", "historical_beat_rate"])
+    decomp_price_paired = brier_decomposition(paired["implied_prob_pre_earnings"], paired["actual_beat"])
+    decomp_prior_paired = brier_decomposition(paired["historical_beat_rate"], paired["actual_beat"])
+    _print_section(
+        "Brier decomposition, implied_prob_pre_earnings vs historical_beat_rate, same n=1,216 paired sample "
+        "(for the theory-section corollary)",
+        {
+            "price_reliability": decomp_price_paired["reliability"],
+            "price_resolution": decomp_price_paired["resolution"],
+            "prior_reliability": decomp_prior_paired["reliability"],
+            "prior_resolution": decomp_prior_paired["resolution"],
+            "exact_gap_via_resolution_minus_reliability": (
+                (decomp_price_paired["resolution"] - decomp_price_paired["reliability"])
+                - (decomp_prior_paired["resolution"] - decomp_prior_paired["reliability"])
+            ),
+            "direct_brier_gap": comparison["brier_historical"] - comparison["brier_implied"],
+        },
+    )
+
     run_encompassing_regression(df)
 
 

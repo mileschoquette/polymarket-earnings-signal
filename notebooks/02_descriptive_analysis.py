@@ -26,13 +26,17 @@ def _print_section(title, obj):
 
 
 def plot_events_per_quarter(coverage, out_dir):
-    """Bar chart of event count per quarter, with unique-ticker count annotated on each bar."""
+    """Bar chart of event count per quarter. Deliberately does not annotate unique-ticker counts
+    on the bars: that figure is close to but not identical to the event count (a small number of
+    tickers report more than once within the same quarter), and an earlier version of this chart
+    that overlaid both numbers on the same bar read as an error to reviewers. The unique-ticker
+    breakdown, when needed, is reported in prose instead.
+    """
     fig, ax = plt.subplots(figsize=(8, 4.5))
     x = coverage.index.astype(str)
     ax.bar(x, coverage["n_events"], color=BLUE, width=0.6)
-    for i, (n_events, n_tickers) in enumerate(zip(coverage["n_events"], coverage["n_unique_tickers"])):
-        label = f"{n_tickers} ticker" + ("" if n_tickers == 1 else "s")
-        ax.text(i, n_events + 3, label, ha="center", fontsize=8, color="#52514e")
+    for i, n_events in enumerate(coverage["n_events"]):
+        ax.text(i, n_events + 3, str(n_events), ha="center", fontsize=8, color="#52514e")
     ax.set_title("Polymarket earnings-beat events per quarter")
     ax.set_ylabel("Number of events")
     ax.spines[["top", "right"]].set_visible(False)
