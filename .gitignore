@@ -4,5 +4,10 @@ __pycache__/
 .env
 data/raw/
 data/processed/
+data/external/
 .ipynb_checkpoints/
 .DS_Store
+paper/.Rhistory
+paper/draft.docx
+Dynamic_Bond_ETF_Allocation_sing_Nelson_Siegel_Yield_Curve_Mispricing_Signals (1).pdf
+FINA 6339_Group Project_Template [Spring 2026] (2).docx
