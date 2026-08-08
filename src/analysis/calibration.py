@@ -61,6 +61,40 @@ def brier_decomposition(probs, outcomes, n_bins=10):
     }
 
 
+def bootstrap_brier_gap_ci(implied_prob, historical_rate, outcomes, dates, n_boot=1000, seed=0, ci=0.90):
+    """Block bootstrap CI on brier_score(historical_rate) - brier_score(implied_prob), restricted
+    to rows where both forecasts are non-null. Resamples distinct values of `dates` with
+    replacement, pulling in every row that shares a resampled date (same within-date clustering
+    rationale as significance.block_bootstrap_sharpe_ci). Returns {observed_gap, boot_gaps, lo,
+    hi}, lo/hi the requested percentile CI (e.g. 5th/95th for ci=0.90) of the bootstrap distribution.
+    """
+    implied = np.asarray(implied_prob, dtype=float)
+    historical = np.asarray(historical_rate, dtype=float)
+    outcomes = np.asarray(outcomes, dtype=float)
+    mask = ~np.isnan(implied) & ~np.isnan(historical)
+    implied, historical, outcomes = implied[mask], historical[mask], outcomes[mask]
+    dates = pd.Series(dates).to_numpy()[mask]
+
+    def _gap(idx):
+        return brier_score(historical[idx], outcomes[idx]) - brier_score(implied[idx], outcomes[idx])
+
+    observed_gap = _gap(np.arange(len(dates)))
+
+    unique_dates = np.unique(dates)
+    positions_by_date = {d: np.flatnonzero(dates == d) for d in unique_dates}
+
+    rng = np.random.default_rng(seed)
+    boot_gaps = np.empty(n_boot)
+    for k in range(n_boot):
+        sampled_dates = rng.choice(unique_dates, size=len(unique_dates), replace=True)
+        idx = np.concatenate([positions_by_date[d] for d in sampled_dates])
+        boot_gaps[k] = _gap(idx)
+
+    alpha = (1 - ci) / 2
+    lo, hi = np.quantile(boot_gaps, [alpha, 1 - alpha])
+    return {"observed_gap": observed_gap, "boot_gaps": boot_gaps, "lo": float(lo), "hi": float(hi)}
+
+
 def compare_forecasts(implied_prob, historical_rate, outcomes):
     """Paired Brier-score comparison of implied_prob vs historical_rate as forecasts of outcomes,
     restricted to the subset of rows where both forecasts are non-null.

@@ -1,6 +1,12 @@
 import numpy as np
+import pandas as pd
 
-from src.analysis.calibration import brier_decomposition, brier_score, compare_forecasts
+from src.analysis.calibration import (
+    bootstrap_brier_gap_ci,
+    brier_decomposition,
+    brier_score,
+    compare_forecasts,
+)
 
 
 def _calibrated_dataset():
@@ -101,3 +107,40 @@ def test_compare_forecasts_restricts_to_paired_non_null_subset():
     expected_historical = brier_score(np.array([0.3, 0.4]), np.array([0, 0]))
     assert abs(result["brier_implied"] - expected_implied) < 1e-12
     assert abs(result["brier_historical"] - expected_historical) < 1e-12
+
+
+def _clustered_gap_dataset(n_dates=20, per_date=5):
+    """implied forecasts the outcome exactly (brier ~ 0); historical always predicts 0.9 against
+    a fair-coin outcome (brier = 0.5^2 + 0.4^2 = 0.41), so historical is clearly worse-calibrated
+    than implied by construction. Rows are grouped into n_dates distinct dates, per_date rows
+    each, to exercise the block-bootstrap's date clustering.
+    """
+    rng = np.random.default_rng(7)
+    outcomes = rng.integers(0, 2, size=n_dates * per_date).astype(float)
+    implied = outcomes.copy()
+    historical = np.full(n_dates * per_date, 0.9)
+    dates = np.repeat([f"2024-01-{d + 1:02d}" for d in range(n_dates)], per_date)
+    return implied, historical, outcomes, dates
+
+
+def test_bootstrap_brier_gap_ci_positive_when_historical_is_clearly_worse():
+    implied, historical, outcomes, dates = _clustered_gap_dataset()
+    result = bootstrap_brier_gap_ci(implied, historical, outcomes, dates, n_boot=200, seed=0, ci=0.90)
+    assert set(result) == {"observed_gap", "boot_gaps", "lo", "hi"}
+    assert len(result["boot_gaps"]) == 200
+    assert result["observed_gap"] > 0.3
+    assert np.isfinite(result["lo"]) and np.isfinite(result["hi"])
+    assert result["lo"] <= result["hi"]
+    assert result["lo"] > 0
+
+
+def test_bootstrap_brier_gap_ci_restricts_to_paired_non_null_subset():
+    implied = np.array([0.2, np.nan, 0.8, 0.6])
+    historical = np.array([0.3, 0.5, np.nan, 0.4])
+    outcomes = np.array([0, 1, 1, 0])
+    dates = pd.Series(["2024-01-01", "2024-01-01", "2024-01-02", "2024-01-02"])
+    # only index 0 and 3 have both non-null, matching test_compare_forecasts' expectation
+    result = bootstrap_brier_gap_ci(implied, historical, outcomes, dates, n_boot=50, seed=0)
+    expected_implied = brier_score(np.array([0.2, 0.6]), np.array([0, 0]))
+    expected_historical = brier_score(np.array([0.3, 0.4]), np.array([0, 0]))
+    assert abs(result["observed_gap"] - (expected_historical - expected_implied)) < 1e-12

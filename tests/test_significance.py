@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from src.strategy.significance import block_bootstrap_sharpe_ci, permutation_test
+from src.strategy.significance import block_bootstrap_sharpe_ci, jobson_korkie_test, permutation_test
 
 
 def _synthetic_panel(n_dates=12, per_date=4, seed=1):
@@ -72,3 +72,42 @@ def test_permutation_test_p_value_is_low_when_direction_perfectly_tracks_return_
         df, "direction", "t_plus_1", n_permutations=200, seed=0, price_loader=_price_loader,
     )
     assert result["p_value"] < 0.2
+
+
+def test_jobson_korkie_identical_series_gives_zero_z_and_p_near_one():
+    rng = np.random.default_rng(2)
+    dates = pd.date_range("2024-01-01", periods=50, freq="D")
+    returns = pd.Series(rng.normal(0.001, 0.02, size=50), index=dates)
+
+    result = jobson_korkie_test(returns, returns.copy())
+
+    assert result["n"] == 50
+    assert abs(result["sharpe_a"] - result["sharpe_b"]) < 1e-12
+    assert abs(result["z_stat"]) < 1e-9
+    assert result["p_value"] > 0.99
+
+
+def test_jobson_korkie_flags_large_sharpe_gap_between_uncorrelated_series():
+    rng = np.random.default_rng(3)
+    dates = pd.date_range("2024-01-01", periods=250, freq="D")
+    # same volatility, very different mean, independent draws -> large |z|, small p
+    high = pd.Series(rng.normal(0.01, 0.01, size=250), index=dates)
+    low = pd.Series(rng.normal(0.0, 0.01, size=250), index=dates)
+
+    result = jobson_korkie_test(high, low)
+
+    assert result["sharpe_a"] > result["sharpe_b"]
+    assert abs(result["z_stat"]) > 4
+    assert result["p_value"] < 0.001
+
+
+def test_jobson_korkie_aligns_on_shared_index_only():
+    dates_a = pd.date_range("2024-01-01", periods=10, freq="D")
+    dates_b = pd.date_range("2024-01-05", periods=10, freq="D")
+    returns_a = pd.Series(np.linspace(0.01, 0.02, 10), index=dates_a)
+    returns_b = pd.Series(np.linspace(-0.01, 0.01, 10), index=dates_b)
+
+    result = jobson_korkie_test(returns_a, returns_b)
+
+    # only the 6 overlapping dates (01-05 through 01-10) should be used
+    assert result["n"] == 6

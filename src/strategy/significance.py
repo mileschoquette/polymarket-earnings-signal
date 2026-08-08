@@ -4,6 +4,7 @@ produce, and how wide is the sampling uncertainty once same-day event clustering
 """
 import numpy as np
 import pandas as pd
+from scipy.stats import norm
 
 from src.strategy.backtest import run_backtest
 from src.strategy.benchmarks import permuted_direction
@@ -67,3 +68,31 @@ def block_bootstrap_sharpe_ci(df, direction_col, exit_horizon, n_boot=1000, seed
     alpha = (1 - ci) / 2
     lo, hi = np.quantile(boot_sharpes, [alpha, 1 - alpha])
     return {"observed_sharpe": observed_sharpe, "boot_sharpes": boot_sharpes, "lo": float(lo), "hi": float(hi)}
+
+
+def jobson_korkie_test(returns_a, returns_b):
+    """Jobson & Korkie (1981) test of equal Sharpe ratios, using Memmel's (2003) corrected
+    asymptotic variance (theta = 2(1-rho) + 0.5(SRa^2 + SRb^2) - rho^2 * SRa * SRb, derived from
+    the exact covariance matrix Memmel gives for the joint asymptotic distribution of the two
+    sample means and variances -- some secondary sources mis-state the cross term as 2*rho rather
+    than rho^2, so this was re-derived by hand from Memmel's stated covariance matrix rather than
+    taken from a paraphrase). Aligns returns_a/returns_b on their shared index (inner join) since
+    the test assumes paired per-period observations; the returned Sharpe ratios and the test
+    statistic are both in raw per-period units, not annualized, because the z-statistic is not
+    scale-invariant under annualization -- annualize separately (e.g. multiply by sqrt(periods_per_year))
+    for display only, after computing this test on the raw series.
+    """
+    aligned_a, aligned_b = returns_a.align(returns_b, join="inner")
+    n = len(aligned_a)
+    sharpe_a = aligned_a.mean() / aligned_a.std(ddof=1)
+    sharpe_b = aligned_b.mean() / aligned_b.std(ddof=1)
+    rho = aligned_a.corr(aligned_b)
+
+    # theta is a variance and can't be negative in theory; clip the tiny negative values floating-
+    # point rounding can produce when rho ~= 1 (e.g. returns_a is a copy of returns_b), and treat
+    # exact equality of the two Sharpe ratios there as z = 0 rather than a 0/0 nan.
+    theta = max(2 * (1 - rho) + 0.5 * (sharpe_a**2 + sharpe_b**2) - rho**2 * sharpe_a * sharpe_b, 0.0)
+    z_stat = 0.0 if theta == 0.0 else (sharpe_a - sharpe_b) / np.sqrt(theta / n)
+    p_value = float(2 * (1 - norm.cdf(abs(z_stat))))
+
+    return {"sharpe_a": float(sharpe_a), "sharpe_b": float(sharpe_b), "z_stat": float(z_stat), "p_value": p_value, "n": n}
